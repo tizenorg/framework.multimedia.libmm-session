@@ -1,7 +1,7 @@
 Name:       libmm-session
 Summary:    mm-session development pkg for samsung
 Version:    0.2.7
-Release:    0
+Release:    1
 Group:      System/Libraries
 License:    Apache License, Version 2.0
 URL:        http://source.tizen.org
@@ -39,6 +39,8 @@ make %{?_smp_mflags}
 
 %install
 rm -rf %{buildroot}
+mkdir -p %{buildroot}/usr/share/license
+cp LICENSE.APLv2 %{buildroot}/usr/share/license/%{name}
 %make_install
 
 
@@ -51,6 +53,7 @@ rm -rf %{buildroot}
 %manifest libmm-session.manifest
 %defattr(-,root,root,-)
 %{_libdir}/libmmfsession.so.*
+%{_datadir}/license/%{name}
 
 %files devel
 %defattr(-,root,root,-)
