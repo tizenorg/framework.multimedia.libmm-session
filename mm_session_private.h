@@ -36,50 +36,23 @@ extern "C" {
 
 #include <mm_session.h>
 
-/**
-  * This enumeration defines session types for internal usage.
-  */
-enum MMSessionTypePrivate{
-	MM_SESSION_TYPE_ALARM = 2,
-	MM_SESSION_TYPE_EMERGENCY,
-	MM_SESSION_TYPE_NOTIFY,
-	MM_SESSION_TYPE_CALL,
-	MM_SESSION_TYPE_VIDEOCALL,
-	MM_SESSION_TYPE_VOIP,
-	MM_SESSION_TYPE_RICH_CALL,
-	MM_SESSION_TYPE_VOICE_RECOGNITION,
-	MM_SESSION_TYPE_RECORD_AUDIO,
-	MM_SESSION_TYPE_RECORD_VIDEO,
-	MM_SESSION_PRIVATE_TYPE_NUM
-};
-
 typedef enum {
 	MM_SUBSESSION_TYPE_VOICE = 0,
 	MM_SUBSESSION_TYPE_RINGTONE,
 	MM_SUBSESSION_TYPE_MEDIA,
-	MM_SUBSESSION_TYPE_VOICE_ANSWER_PLAY,
-	MM_SUBSESSION_TYPE_VOICE_ANSWER_REC,
 	MM_SUBSESSION_TYPE_INIT,
 	MM_SUBSESSION_TYPE_VR_NORMAL,
 	MM_SUBSESSION_TYPE_VR_DRIVE,
 	MM_SUBSESSION_TYPE_RECORD_STEREO,
-	MM_SUBSESSION_TYPE_RECORD_STEREO_FOR_INTERVIEW,
-	MM_SUBSESSION_TYPE_RECORD_STEREO_FOR_CONVERSATION,
 	MM_SUBSESSION_TYPE_RECORD_MONO,
 	MM_SUBSESSION_TYPE_NUM
 } mm_subsession_t;
 
 typedef enum {
 	MM_SUBSESSION_OPTION_NONE = 0,
-	MM_SUBSESSION_OPTION_SVOICE = 1,
 	MM_SUBSESSION_OPTION_NUM
 	/* NOTE : Do not exceed 15, because of using mm_subsession_option_priv_t type with it internally */
 } mm_subsession_option_t;
-
-typedef enum {
-	MM_SUBSESSION_OPTION_PRIV_SVOICE_WAKEUP = 0x00000010,
-	MM_SUBSESSION_OPTION_PRIV_SVOICE_COMMAND = 0x00000020
-} mm_subsession_option_priv_t;
 
 typedef enum {
 	MM_SESSION_SUB_TYPE_NONE = 0,
@@ -89,19 +62,16 @@ typedef enum {
 
 
 /**
- * This function delete session type information to system
+ * This function delete session information to system
  *
  * @param	app_pid [in] Application pid (if -1, use caller process)
  * @return	This function returns MM_ERROR_NONE on success, or negative value
  *			with error code.
  * @remark	This function is only for internal implementation do not use this at application
- * 			Session type is unique for each application.
- * 			if application want to change session type, Finish session first and Init again
- * @see		_mm_session_util_write_type _mm_session_util_read_type
+ * @see		_mm_session_util_write_type _mm_session_util_read_type _mm_session_util_write_information _mm_session_util_read_information
  * @since
  */
-int _mm_session_util_delete_type(int app_pid);
-
+int _mm_session_util_delete_information(int app_pid);
 
 
 /**
@@ -115,7 +85,7 @@ int _mm_session_util_delete_type(int app_pid);
  * @remark	This function is only for internal implementation do not use this at application
  * 			Session type is unique for each application.
  * 			if application want to change session type, Finish session first and Init again
- * @see		_mm_session_util_delete_type _mm_session_util_read_type
+ * @see		_mm_session_util_delete_information _mm_session_util_read_type
  * @since
  */
 int _mm_session_util_write_type(int app_pid, int sessiontype);
@@ -131,10 +101,43 @@ int _mm_session_util_write_type(int app_pid, int sessiontype);
  *			with error code.
  * @remark	Session type is unique for each application.
  * 			if application want to change session type, Finish session first and Init again
- * @see		_mm_session_util_write_type _mm_session_util_delete_type
+ * @see		_mm_session_util_write_type _mm_session_util_delete_information
  * @since
  */
 int _mm_session_util_read_type(int app_pid, int *sessiontype);
+
+
+/**
+ * This function write session information to system
+ *
+ * @param	app_pid [in] Application pid (if -1, use caller process)
+ * @param	session_type	[in] Multimedia Session type
+ * @param	flags	[in] Multimedia Session options
+ *
+ * @return	This function returns MM_ERROR_NONE on success, or negative value
+ *			with error code.
+ * @remark	This function is only for internal implementation do not use this at application
+ * 			Session type and Session option are unique for each application.
+ * @see		_mm_session_util_delete_information _mm_session_util_read_information
+ * @since
+ */
+int _mm_session_util_write_information(int app_pid, int session_type, int flags);
+
+
+/**
+ * This function read session information from system
+ *
+ * @param	app_pid [in] Application pid (if -1, use caller process)
+ * @param	sessiontype	[out] Multimedia Session type
+ * @param	flags	[out] Multimedia Session options
+ * @return	This function returns MM_ERROR_NONE on success, or negative value
+ *			with error code.
+ * @remark	Session type is unique for each application.
+ * @see		_mm_session_util_write_information _mm_session_util_delete_information
+ * @since
+ */
+int _mm_session_util_read_information(int app_pid, int *session_type, int *flags);
+
 
 /**
  * This function set sub-session type

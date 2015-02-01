@@ -105,19 +105,25 @@ int mm_session_init_ex(int sessiontype, session_callback_fn callback, void* user
 	int error = 0;
 	int result = MM_ERROR_NONE;
 	int ltype = 0;
+	bool do_not_update_session_info = false;
 	pthread_mutex_init(&g_mutex_monitor, NULL);
 	debug_fenter();
 	debug_log("type : %d", sessiontype);
 
-	if (sessiontype < MM_SESSION_TYPE_SHARE || sessiontype >= MM_SESSION_PRIVATE_TYPE_NUM) {
+	if (sessiontype < MM_SESSION_TYPE_MEDIA || sessiontype >= MM_SESSION_TYPE_NUM) {
 		debug_error("Invalid argument %d",sessiontype);
 		return MM_ERROR_INVALID_ARGUMENT;
 	}
 
 	result = _mm_session_util_read_type(-1, &ltype);
 	if (MM_ERROR_INVALID_HANDLE != result) {
-		debug_error("Session already initialized. Please finish current session first");
-		return MM_ERROR_POLICY_DUPLICATED;
+		if ((ltype == MM_SESSION_TYPE_MEDIA_RECORD) && sessiontype == MM_SESSION_TYPE_MEDIA) {
+			/* already set by mm-camcorder, mm-sound(pcm in), keep going */
+			do_not_update_session_info = true;
+		} else {
+			debug_error("Session already initialized. Please finish current session first");
+			return MM_ERROR_POLICY_DUPLICATED;
+		}
 	}
 
 	/* Monitor Callback */
@@ -151,10 +157,6 @@ int mm_session_init_ex(int sessiontype, session_callback_fn callback, void* user
 		if(!ASM_register_sound(-1, &g_asm_handle, ASM_EVENT_VOIP, ASM_STATE_PLAYING, NULL, NULL, ASM_RESOURCE_NONE, &error)) {
 			goto REGISTER_FAILURE;
 		}
-	} else if (sessiontype == MM_SESSION_TYPE_RICH_CALL) {
-		if(!ASM_register_sound(-1, &g_asm_handle, ASM_EVENT_RICH_CALL, ASM_STATE_PLAYING, NULL, NULL, ASM_RESOURCE_NONE, &error)) {
-			goto REGISTER_FAILURE;
-		}
 	}
 	/* Register here for advanced session types (using asm_sub_event) */
 	  else if (sessiontype == MM_SESSION_TYPE_VOICE_RECOGNITION) {
@@ -173,31 +175,31 @@ int mm_session_init_ex(int sessiontype, session_callback_fn callback, void* user
 
 	g_session_type = sessiontype;
 
-	result = _mm_session_util_write_type(-1, sessiontype);
-	if (MM_ERROR_NONE != result) {
-		debug_error("Write type failed");
-		if (sessiontype == MM_SESSION_TYPE_CALL) {
-			ASM_unregister_sound(g_asm_handle, ASM_EVENT_CALL, &error);
-		} else if (sessiontype == MM_SESSION_TYPE_VIDEOCALL) {
-			ASM_unregister_sound(g_asm_handle, ASM_EVENT_VIDEOCALL, &error);
-		} else if (sessiontype == MM_SESSION_TYPE_VOIP) {
-			ASM_unregister_sound(g_asm_handle, ASM_EVENT_VOIP, &error);
-		} else if (sessiontype == MM_SESSION_TYPE_RICH_CALL) {
-			ASM_unregister_sound(g_asm_handle, ASM_EVENT_RICH_CALL, &error);
-		} else if (sessiontype == MM_SESSION_TYPE_VOICE_RECOGNITION) {
-			ASM_unregister_sound(g_asm_handle, ASM_EVENT_VOICE_RECOGNITION, &error);
-		} else if (sessiontype == MM_SESSION_TYPE_RECORD_AUDIO) {
-			ASM_unregister_sound(g_asm_handle, ASM_EVENT_MMCAMCORDER_AUDIO, &error);
-		} else if (sessiontype == MM_SESSION_TYPE_RECORD_VIDEO) {
-			ASM_unregister_sound(g_asm_handle, ASM_EVENT_MMCAMCORDER_VIDEO, &error);
-		} else {
-			LOCK(g_mutex_monitor);
-			ASM_unregister_sound(g_monitor_asm_handle, ASM_EVENT_MONITOR, &error);
-			UNLOCK(g_mutex_monitor);
+	if (!do_not_update_session_info) {
+		result = _mm_session_util_write_type(-1, sessiontype);
+		if (MM_ERROR_NONE != result) {
+			debug_error("Write type failed");
+			if (sessiontype == MM_SESSION_TYPE_CALL) {
+				ASM_unregister_sound(g_asm_handle, ASM_EVENT_CALL, &error);
+			} else if (sessiontype == MM_SESSION_TYPE_VIDEOCALL) {
+				ASM_unregister_sound(g_asm_handle, ASM_EVENT_VIDEOCALL, &error);
+			} else if (sessiontype == MM_SESSION_TYPE_VOIP) {
+				ASM_unregister_sound(g_asm_handle, ASM_EVENT_VOIP, &error);
+			} else if (sessiontype == MM_SESSION_TYPE_VOICE_RECOGNITION) {
+				ASM_unregister_sound(g_asm_handle, ASM_EVENT_VOICE_RECOGNITION, &error);
+			} else if (sessiontype == MM_SESSION_TYPE_RECORD_AUDIO) {
+				ASM_unregister_sound(g_asm_handle, ASM_EVENT_MMCAMCORDER_AUDIO, &error);
+			} else if (sessiontype == MM_SESSION_TYPE_RECORD_VIDEO) {
+				ASM_unregister_sound(g_asm_handle, ASM_EVENT_MMCAMCORDER_VIDEO, &error);
+			} else {
+				LOCK(g_mutex_monitor);
+				ASM_unregister_sound(g_monitor_asm_handle, ASM_EVENT_MONITOR, &error);
+				UNLOCK(g_mutex_monitor);
+			}
+			g_asm_handle = -1;
+			g_session_type = -1;
+			return result;
 		}
-		g_asm_handle = -1;
-		g_session_type = -1;
-		return result;
 	}
 
 	debug_fleave();
@@ -220,6 +222,50 @@ REGISTER_FAILURE:
 }
 
 EXPORT_API
+int mm_session_update_option(session_update_type_t update_type, int options)
+{
+	int error = 0;
+	int result = MM_ERROR_NONE;
+	int ltype = 0;
+	int loption = 0;
+
+	debug_log("update_type: %d(0:Add, 1:Remove), options: %x", update_type, options);
+
+	if (update_type < 0 || update_type >= MM_SESSION_UPDATE_TYPE_NUM) {
+		debug_error("Invalid update_type value(%d)", update_type);
+		return MM_ERROR_INVALID_ARGUMENT;
+	}
+	if (options < 0) {
+		debug_error("Invalid options value(%x)", options);
+		return MM_ERROR_INVALID_ARGUMENT;
+	}
+
+	result = _mm_session_util_read_information(-1, &ltype, &loption);
+	if (result) {
+		debug_error("failed to _mm_session_util_read_information(), ret(%x)", result);
+		return result;
+	}
+	debug_log("[current] session_type: %d, session_option: %x", ltype, loption);
+
+	if (update_type == MM_SESSION_UPDATE_TYPE_ADD) {
+		loption |= options;
+	} else if (update_type == MM_SESSION_UPDATE_TYPE_REMOVE) {
+		loption &= ~options;
+	}
+
+	result = _mm_session_util_write_information(-1, ltype, loption);
+	if (result) {
+		debug_error("failed to _mm_session_util_write_information(), ret(%x)", result);
+		return result;
+	}
+
+	debug_log("[updated] session_type: %d, session_option: %x", ltype, loption);
+
+
+	return MM_ERROR_NONE;
+}
+
+EXPORT_API
 int mm_session_add_watch_callback(int watchevent, int watchstate, watch_callback_fn callback, void* user_param)
 {
 	int result = MM_ERROR_NONE;
@@ -235,7 +281,7 @@ int mm_session_add_watch_callback(int watchevent, int watchstate, watch_callback
 	}
 	debug_log("type : %d", sessiontype);
 
-	if (sessiontype < MM_SESSION_TYPE_SHARE || sessiontype >= MM_SESSION_PRIVATE_TYPE_NUM) {
+	if (sessiontype < MM_SESSION_TYPE_MEDIA || sessiontype >= MM_SESSION_TYPE_NUM) {
 		debug_error("Invalid session type %d", sessiontype);
 		return MM_ERROR_INVALID_ARGUMENT;
 	}
@@ -294,11 +340,39 @@ int mm_session_get_current_type(int *sessiontype)
 }
 
 EXPORT_API
+int mm_session_get_current_information(int *session_type, int *session_options)
+{
+	int result = MM_ERROR_NONE;
+	int ltype = 0;
+	int loption = 0;
+
+	debug_fenter();
+
+	if (session_type == NULL) {
+		debug_error("input argument is NULL\n");
+		return MM_ERROR_INVALID_ARGUMENT;
+	}
+
+	result = _mm_session_util_read_information(-1, &ltype, &loption);
+	if (result == MM_ERROR_NONE) {
+		debug_log("Current process session type = [%d], options = [%x]\n", ltype, loption);
+		*session_type = ltype;
+		*session_options = loption;
+	} else {
+		debug_error("failed to get current process session type, option!!\n");
+	}
+
+	debug_fleave();
+
+	return result;
+}
+
+EXPORT_API
 int mm_session_finish(void)
 {
 	int error = 0;
 	int result = MM_ERROR_NONE;
-	int sessiontype = MM_SESSION_TYPE_SHARE;
+	int sessiontype = MM_SESSION_TYPE_MEDIA;
 	ASM_sound_states_t state = ASM_STATE_NONE;
 
 	debug_fenter();
@@ -321,10 +395,6 @@ int mm_session_finish(void)
 		}
 	} else if (sessiontype == MM_SESSION_TYPE_VOIP) {
 		if (!ASM_unregister_sound(g_asm_handle, ASM_EVENT_VOIP, &error)) {
-			goto INVALID_HANDLE;
-		}
-	} else if (sessiontype == MM_SESSION_TYPE_RICH_CALL) {
-		if (!ASM_unregister_sound(g_asm_handle, ASM_EVENT_RICH_CALL, &error)) {
 			goto INVALID_HANDLE;
 		}
 	}
@@ -358,14 +428,12 @@ int mm_session_finish(void)
 				return MM_ERROR_POLICY_INTERNAL;
 			} else {
 				switch(state) {
-				case ASM_STATE_IGNORE:
 				case ASM_STATE_NONE:
 					break;
 				case ASM_STATE_PLAYING:
 				case ASM_STATE_WAITING:
 				case ASM_STATE_STOP:
 				case ASM_STATE_PAUSE:
-				case ASM_STATE_PAUSE_BY_APP:
 					debug_error("[%s] MSL instance still alive", __func__);
 					UNLOCK(g_mutex_monitor);
 					DESTROY(g_mutex_monitor);
@@ -388,7 +456,7 @@ int mm_session_finish(void)
 		DESTROY(g_mutex_monitor);
 	}
 
-	result = _mm_session_util_delete_type(-1);
+	result = _mm_session_util_delete_information(-1);
 	if(result != MM_ERROR_NONE)
 		return result;
 
@@ -418,7 +486,7 @@ int mm_session_remove_watch_callback(int watchevent, int watchstate)
 	}
 	debug_log("type : %d", sessiontype);
 
-	if(sessiontype < MM_SESSION_TYPE_SHARE || sessiontype >= MM_SESSION_PRIVATE_TYPE_NUM) {
+	if(sessiontype < MM_SESSION_TYPE_MEDIA || sessiontype >= MM_SESSION_TYPE_NUM) {
 		debug_error("Invalid session type %d", sessiontype);
 		return MM_ERROR_INVALID_ARGUMENT;
 	}
@@ -459,13 +527,13 @@ int mm_session_set_subsession(mm_subsession_t subsession, mm_subsession_option_t
 		debug_error ("call session is not started...\n");
 		return MM_ERROR_INVALID_HANDLE;
 	}
-	if (g_session_type == -1 || g_session_type < MM_SESSION_TYPE_CALL || g_session_type >= MM_SESSION_PRIVATE_TYPE_NUM ) {
+	if (g_session_type == -1 || g_session_type < MM_SESSION_TYPE_CALL || g_session_type >= MM_SESSION_TYPE_NUM ) {
 		debug_error ("session type is null, or out of bound(%d)\n", g_session_type);
 		return MM_ERROR_INVALID_HANDLE;
 	}
 
-	if (subsession >= MM_SUBSESSION_TYPE_VOICE && subsession <= MM_SUBSESSION_TYPE_VOICE_ANSWER_REC) {
-		if (g_session_type < MM_SESSION_TYPE_CALL || g_session_type > MM_SESSION_TYPE_RICH_CALL) {
+	if (subsession >= MM_SUBSESSION_TYPE_VOICE && subsession <= MM_SUBSESSION_TYPE_MEDIA) {
+		if (g_session_type < MM_SESSION_TYPE_CALL || g_session_type > MM_SESSION_TYPE_VOIP) {
 			debug_error ("Not support this subsession(%d) of CALL session_type(%d)\n", subsession, g_session_type);
 			return MM_ERROR_INVALID_HANDLE;
 		}
@@ -479,12 +547,6 @@ int mm_session_set_subsession(mm_subsession_t subsession, mm_subsession_option_t
 	} else if (subsession == MM_SUBSESSION_TYPE_RECORD_STEREO ||
 				subsession == MM_SUBSESSION_TYPE_RECORD_MONO) {
 		if (g_session_type < MM_SESSION_TYPE_RECORD_AUDIO || g_session_type > MM_SESSION_TYPE_RECORD_VIDEO) {
-			debug_error ("Not support this subsession(%d) of the session_type(%d)\n", subsession, g_session_type);
-			return MM_ERROR_INVALID_HANDLE;
-		}
-	} else if (subsession == MM_SUBSESSION_TYPE_RECORD_STEREO_FOR_INTERVIEW ||
-				subsession == MM_SUBSESSION_TYPE_RECORD_STEREO_FOR_CONVERSATION) {
-		if (g_session_type != MM_SESSION_TYPE_RECORD_AUDIO) {
 			debug_error ("Not support this subsession(%d) of the session_type(%d)\n", subsession, g_session_type);
 			return MM_ERROR_INVALID_HANDLE;
 		}
@@ -518,7 +580,7 @@ int mm_session_get_subsession(mm_subsession_t *subsession)
 		debug_error ("call session is not started...\n");
 		return MM_ERROR_INVALID_HANDLE;
 	}
-	if(g_session_type == -1 || g_session_type < MM_SESSION_TYPE_CALL || g_session_type >= MM_SESSION_PRIVATE_TYPE_NUM ) {
+	if(g_session_type == -1 || g_session_type < MM_SESSION_TYPE_CALL || g_session_type >= MM_SESSION_TYPE_NUM ) {
 		debug_error ("Not support this session_type(%d)\n", g_session_type);
 		return MM_ERROR_INVALID_HANDLE;
 	}
@@ -547,7 +609,7 @@ int mm_session_set_subevent(mm_session_sub_t subevent)
 		debug_error ("session is not started...\n");
 		return MM_ERROR_INVALID_HANDLE;
 	}
-	if(g_session_type == -1 ||  g_session_type < MM_SESSION_TYPE_VOICE_RECOGNITION || g_session_type >= MM_SESSION_PRIVATE_TYPE_NUM ) {
+	if(g_session_type == -1 ||  g_session_type < MM_SESSION_TYPE_VOICE_RECOGNITION || g_session_type >= MM_SESSION_TYPE_NUM ) {
 		debug_error ("not support this session_type(%d)\n", g_session_type);
 		return MM_ERROR_INVALID_ARGUMENT;
 	}
@@ -584,7 +646,7 @@ int mm_session_get_subevent(mm_session_sub_t *subevent)
 		debug_error ("session is not started...\n");
 		return MM_ERROR_INVALID_HANDLE;
 	}
-	if(g_session_type == -1 ||  g_session_type < MM_SESSION_TYPE_VOICE_RECOGNITION || g_session_type >= MM_SESSION_PRIVATE_TYPE_NUM ) {
+	if(g_session_type == -1 ||  g_session_type < MM_SESSION_TYPE_VOICE_RECOGNITION || g_session_type >= MM_SESSION_TYPE_NUM ) {
 		debug_error ("not support this session_type(%d)\n", g_session_type);
 		return MM_ERROR_INVALID_ARGUMENT;
 	}
@@ -613,7 +675,7 @@ int mm_session_reset_resumption_info(void)
 		debug_error ("call series or voice recognition session is not started...\n");
 		return MM_ERROR_INVALID_HANDLE;
 	}
-	if(g_session_type == -1 || g_session_type < MM_SESSION_TYPE_SHARE || g_session_type >= MM_SESSION_PRIVATE_TYPE_NUM ) {
+	if(g_session_type == -1 || g_session_type < MM_SESSION_TYPE_MEDIA || g_session_type >= MM_SESSION_TYPE_NUM ) {
 		debug_error ("not support this session_type(%d)\n", g_session_type);
 		return MM_ERROR_INVALID_ARGUMENT;
 	}
@@ -629,7 +691,7 @@ int mm_session_reset_resumption_info(void)
 }
 
 EXPORT_API
-int _mm_session_util_delete_type(int app_pid)
+int _mm_session_util_delete_information(int app_pid)
 {
 	pid_t mypid;
 	char filename[MAX_FILE_LENGTH];
@@ -655,7 +717,7 @@ int _mm_session_util_write_type(int app_pid, int sessiontype)
 	int fd = -1;
 	char filename[MAX_FILE_LENGTH];
 
-	if(sessiontype < MM_SESSION_TYPE_SHARE || sessiontype >= MM_SESSION_PRIVATE_TYPE_NUM) {
+	if(sessiontype < MM_SESSION_TYPE_MEDIA || sessiontype >= MM_SESSION_TYPE_NUM) {
 		return MM_ERROR_INVALID_ARGUMENT;
 	}
 
@@ -671,11 +733,12 @@ int _mm_session_util_write_type(int app_pid, int sessiontype)
 		debug_error("open() failed with %d",errno);
 		return MM_ERROR_FILE_WRITE;
 	}
+	sessiontype = sessiontype << 16;
 	write(fd, &sessiontype, sizeof(int));
 	if(0 > fchmod (fd, 00777)) {
 		debug_error("fchmod failed with %d", errno);
 	} else {
-		debug_warning("write sessiontype(%d) to /tmp/mm_session_%d", sessiontype, mypid);
+		debug_warning("write sessiontype(%d) to /tmp/mm_session_%d", sessiontype >> 16, mypid);
 	}
 	close(fd);
 	////// WRITE SESSION TYPE /////////
@@ -707,9 +770,91 @@ int _mm_session_util_read_type(int app_pid, int *sessiontype)
 		return MM_ERROR_INVALID_HANDLE;
 	}
 	read(fd, sessiontype, sizeof(int));
+	*sessiontype = *sessiontype >> 16;
 	debug_warning("read sessiontype(%d) from /tmp/mm_session_%d", *sessiontype, mypid);
 	close(fd);
 	////// READ SESSION TYPE /////////
+
+	debug_fleave();
+
+	return MM_ERROR_NONE;
+}
+
+EXPORT_API
+int _mm_session_util_write_information(int app_pid, int session_type, int flags)
+{
+	pid_t mypid;
+	int fd = -1;
+	char filename[MAX_FILE_LENGTH];
+	int result_info = 0;
+
+	if(session_type < MM_SESSION_TYPE_MEDIA || session_type >= MM_SESSION_TYPE_NUM) {
+		return MM_ERROR_INVALID_ARGUMENT;
+	}
+	if(flags < 0) {
+		return MM_ERROR_INVALID_ARGUMENT;
+	}
+
+	if(app_pid == -1) {
+		mypid = getpid();
+	} else {
+		mypid = (pid_t)app_pid;
+	}
+
+	////// WRITE SESSION INFO /////////
+	snprintf(filename, sizeof(filename)-1, "/tmp/mm_session_%d",mypid);
+	fd = open(filename, O_WRONLY | O_CREAT, 0644 );
+	if(fd < 0) {
+		debug_error("open() failed with %d",errno);
+		return MM_ERROR_FILE_WRITE;
+	}
+
+	result_info = (flags) | (session_type << 16);
+	write(fd, &result_info, sizeof(int));
+	if(0 > fchmod (fd, 00777)) {
+		debug_error("fchmod failed with %d", errno);
+	} else {
+		debug_warning("write session information(%x) to /tmp/mm_session_%d", result_info, mypid);
+	}
+	close(fd);
+	////// WRITE SESSION INFO /////////
+
+	return MM_ERROR_NONE;
+}
+
+EXPORT_API
+int _mm_session_util_read_information(int app_pid, int *session_type, int *flags)
+{
+	pid_t mypid;
+	int fd = -1;
+	char filename[MAX_FILE_LENGTH];
+	int result_info = 0;
+
+	debug_fenter();
+
+	if(session_type == NULL || flags == NULL) {
+		return MM_ERROR_INVALID_ARGUMENT;
+	}
+
+	if(app_pid == -1) {
+		mypid = getpid();
+	} else {
+		mypid = (pid_t)app_pid;
+	}
+
+	////// READ SESSION INFO /////////
+	snprintf(filename, sizeof(filename)-1, "/tmp/mm_session_%d",mypid);
+	fd = open(filename, O_RDONLY);
+	if(fd < 0) {
+		return MM_ERROR_INVALID_HANDLE;
+	}
+	read(fd, &result_info, sizeof(int));
+	*session_type = result_info >> 16;
+	*flags = result_info & 0x0000ffff;
+
+	debug_warning("read session_type(%d), session_option(%x) from /tmp/mm_session_%d", *session_type, *flags, mypid);
+	close(fd);
+	////// READ SESSION INFO /////////
 
 	debug_fleave();
 
@@ -751,6 +896,7 @@ static session_event_t _translate_from_event_src_to_mm_session(ASM_event_sources
 	switch (event_src)
 	{
 	case ASM_EVENT_SOURCE_CALL_START:
+	case ASM_EVENT_SOURCE_CALL_END:
 		return MM_SESSION_EVENT_CALL;
 
 	case ASM_EVENT_SOURCE_EARJACK_UNPLUG:
@@ -771,9 +917,6 @@ static session_event_t _translate_from_event_src_to_mm_session(ASM_event_sources
 	case ASM_EVENT_SOURCE_EMERGENCY_END:
 		return MM_SESSION_EVENT_EMERGENCY;
 
-	case ASM_EVENT_SOURCE_RESUMABLE_MEDIA:
-		return MM_SESSION_EVENT_RESUMABLE_MEDIA;
-
 	case ASM_EVENT_SOURCE_MEDIA:
 	case ASM_EVENT_SOURCE_OTHER_PLAYER_APP:
 	default:
@@ -791,8 +934,6 @@ static session_watch_event_t _translate_from_asm_event_to_mm_session(ASM_sound_e
 		return MM_SESSION_WATCH_EVENT_VIDEO_CALL;
 	case ASM_EVENT_ALARM:
 		return MM_SESSION_WATCH_EVENT_ALARM;
-	case ASM_EVENT_EXCLUSIVE_MMCAMCORDER:
-		return MM_SESSION_WATCH_EVENT_MMCAMCORDER_EXCLUSIVE;
 	default:
 		return MM_SESSION_WATCH_EVENT_IGNORE;
 	}
@@ -808,8 +949,6 @@ static ASM_sound_events_t _translate_from_mm_session_to_asm_event(session_watch_
 		return ASM_EVENT_VIDEOCALL;
 	case MM_SESSION_WATCH_EVENT_ALARM:
 		return ASM_EVENT_ALARM;
-	case MM_SESSION_WATCH_EVENT_MMCAMCORDER_EXCLUSIVE:
-		return ASM_EVENT_EXCLUSIVE_MMCAMCORDER;
 	default:
 		return ASM_EVENT_NONE;
 	}
@@ -824,7 +963,7 @@ static ASM_sound_states_t _translate_from_mm_session_to_asm_state(session_watch_
 	case MM_SESSION_WATCH_STATE_PLAYING:
 		return ASM_STATE_PLAYING;
 	default:
-		return ASM_STATE_IGNORE;
+		return ASM_STATE_NONE;
 	}
 }
 
@@ -938,7 +1077,7 @@ void __mmsession_finalize(void)
 		UNLOCK(g_mutex_monitor);
 		DESTROY(g_mutex_monitor);
 	}
-	_mm_session_util_delete_type(-1);
+	_mm_session_util_delete_information(-1);
 
 	debug_fleave();
 }
