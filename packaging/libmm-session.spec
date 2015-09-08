@@ -1,14 +1,14 @@
 Name:       libmm-session
 Summary:    mm-session development pkg for samsung
-Version:    0.2.1
-Release:    1
-Group:      TO_BE/FILLED_IN
-License:    TO BE FILLED IN
+Version:    0.4.16
+Release:    0
+Group:      System/Libraries
+License:    Apache-2.0
+URL:        http://source.tizen.org
 Source0:    libmm-session-%{version}.tar.gz
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 BuildRequires:  pkgconfig(audio-session-mgr)
-BuildRequires:  pkgconfig(dlog)
 BuildRequires:  pkgconfig(mm-common)
 
 
@@ -48,6 +48,7 @@ rm -rf %{buildroot}
 
 
 %files
+%manifest libmm-session.manifest
 %defattr(-,root,root,-)
 /usr/lib/libmmfsession.so.*
 
